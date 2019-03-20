@@ -6,6 +6,8 @@
     - [2. ExecutorService](#2-executorservice)
     - [3. AbstractExecutorService](#3-abstractexecutorservice)
     - [4. ThreadPoolExecutor](#4-threadpoolexecutor)
+      - [4.1 重要方法解读](#41-%E9%87%8D%E8%A6%81%E6%96%B9%E6%B3%95%E8%A7%A3%E8%AF%BB)
+      - [4.2 需要注意的参数(来自源码解读)](#42-%E9%9C%80%E8%A6%81%E6%B3%A8%E6%84%8F%E7%9A%84%E5%8F%82%E6%95%B0%E6%9D%A5%E8%87%AA%E6%BA%90%E7%A0%81%E8%A7%A3%E8%AF%BB)
     - [5. ScheduledExecutorService](#5-scheduledexecutorservice)
     - [6. ScheduleThreadPoolExecutor](#6-schedulethreadpoolexecutor)
     - [7. Executors](#7-executors)
@@ -68,6 +70,21 @@ ExecutorService接口实现了Executor接口，同时扩展了处理能力
 一种ExecutorService的实现，它通常使用Executors返回的某一种池化的线程池来执行提交的任务。  
 线程池解决了两个问题:由于减少了每个任务的调用开销，它们通常在执行大量异步任务时提供改进的性能，并且它们提供了一种绑定和管理资源的方法，包括在执行任务集合时消耗的线程。每个{@code ThreadPoolExecutor 还维护一些基本统计信息，例如已完成任务的数量。  
 为了在各种上下文中有用，这个类提供了许多可调参数和可扩展性钩子。 但是在实际使用中，通常使用Executors提供的方法来初始化数据。当然，如果需要自己配置的话，需要注意以下参数:
+
+#### 4.1 重要方法解读
+
+* execute 方法
+
+<pre>
+使用future方式执行一个提交的任务，执行的线程要么新创建一个，要么从线程池中获取。
+如果一个任务不能被顺利提交，那么要么是因为线程被关闭掉了，要么是线程池满了。那么在这种情况下会使用拒绝策略
+执行分为三步:
+1. 如果小于coreSize，那么会新创建线程进行处理。对addWorker的调用以原子方式检查runState和workerCount，因此通过返回false来防止在不应该添加线程时出现的错误警报。
+2. 如果提交的任务能够加入到阻塞队列，那么我们依然会检查是否需要添加一个新的线程(因为上次检查之后可能有些线程关闭或者空闲下来了)，如果没有线程来处理，则重新入队，否则启动新的线程进行处理
+3. 如果不能加入到阻塞队列，那么我们会尝试新创建一个线程进行处理。如果失败的话，那么就会走拒绝策略
+</pre>
+
+#### 4.2 需要注意的参数(来自源码解读)
 
 * core and max pool size
 
@@ -147,10 +164,11 @@ ExecutorService接口实现了Executor接口，同时扩展了处理能力
 这个类其实就是一个工具类，通过工厂模式实现四种线程池的初始化操作。
 ![](images/Executors_class.jpg)
 
-
 ## 四种线程池
 
 ### 1. NewCachedThreadPool
+
+创建一个可以任意开辟新线程的线程池，但是可以重用之前创建的线程。这种线程池可以很好的提高短期异步线程的效率。
 
 底层存储: SynchronousQueue 是一种极为特殊的阻塞队列，它没有实际的容量,但是由于该Queue本身的特性，在某次添加元素后必须等待其他线程取走后才能继续添加；可以认为SynchronousQueue是一个缓存值为1的阻塞队列，但是 isEmpty()方法永远返回是true，remainingCapacity() 方法永远返回是0，remove()和removeAll() 方法永远返回是false，iterator()方法永远返回空，peek()方法永远返回null。
 
@@ -158,17 +176,24 @@ ExecutorService接口实现了Executor接口，同时扩展了处理能力
 
 ### 2. NewFixedThreadPool
 
+创建一个线程池，该线程池重用在共享的无界队列中运行的固定数量的线程,在任何时刻，都只有最多coreSize的线程保持活跃。如果当前所有的线程都处于繁忙状态，新提交的任务会存入到阻塞队列中，直到有可用的线程为止。如果在执行任务的过程中有线程挂掉了，那么会新生成新的线程进行处理。线程池的线程就一直保持存在，直到线程池退出。
+
 底层存储: LinkedBlockingQueue 基于链表的阻塞队列，内部维持着一个数据缓冲队列（该队列由链表构成）。当生产者往队列中放入一个数据时，队列会从生产者手中获取数据，并缓存在队列内部，而生产者立即返回；只有当队列缓冲区达到最大值缓存容量时（LinkedBlockingQueue可以通过构造函数指定该值），才会阻塞生产者队列，直到消费者从队列中消费掉一份数据，生产者线程会被唤醒，反之对于消费者这端的处理也基于同样的原理。
 
 ### 3. NewScheduledThreadPool
+
+创建一个可以执行延迟命令或周期任务的线程池
 
 底层存储:DelayedWorkQueue 优先级队列都是通过堆这种方式可以快速实现优先级队列，它的插入和删除操作的效率都是O(log N)。
 
 ### 4. NewSingleThreadPool
 
-底层存储: LinkedBlockingQueue 基于链表的阻塞队列，内部维持着一个数据缓冲队列（该队列由链表构成）。当生产者往队列中放入一个数据时，队列会从生产者手中获取数据，并缓存在队列内部，而生产者立即返回；只有当队列缓冲区达到最大值缓存容量时（LinkedBlockingQueue可以通过构造函数指定该值），才会阻塞生产者队列，直到消费者从队列中消费掉一份数据，生产者线程会被唤醒，反之对于消费者这端的处理也基于同样的原理。
+创建一个Executor，它使用一个在无界队列，这个队列中只有一个worker线程。(强调:如果当前线程挂掉了，那么会启动一个新的线程处理请求)。保证任务按顺序执行，并且在任意时刻都只有一个线程在处理。这与newFixedThreadPool(1)不一样，他不能对返回的线程进行重新的配置。
 
-new ThreadPoolExecutor(0, Integer.MAX_VALUE,60L, TimeUnit.SECONDS,new SynchronousQueue<Runnable>());
-new ThreadPoolExecutor(nThreads, nThreads,0L, TimeUnit.MILLISECONDS,new LinkedBlockingQueue<Runnable>());
-new ThreadPoolExecutor((corePoolSize, Integer.MAX_VALUE, 0, NANOSECONDS,new DelayedWorkQueue());
-new ThreadPoolExecutor(1, 1,0L, TimeUnit.MILLISECONDS,new LinkedBlockingQueue<Runnable>()));
+构造函数返回的对象其实是一个FinalizableDelegatedExecutorService，通过源代码可以得出以下结论:  
+
+1. 单线任务处理的线程池
+2. shutdown方法必然会被调用
+3. 不具备ThreadPoolExecutor所有功能的线程池
+
+底层存储: LinkedBlockingQueue 基于链表的阻塞队列，内部维持着一个数据缓冲队列（该队列由链表构成）。当生产者往队列中放入一个数据时，队列会从生产者手中获取数据，并缓存在队列内部，而生产者立即返回；只有当队列缓冲区达到最大值缓存容量时（LinkedBlockingQueue可以通过构造函数指定该值），才会阻塞生产者队列，直到消费者从队列中消费掉一份数据，生产者线程会被唤醒，反之对于消费者这端的处理也基于同样的原理。
